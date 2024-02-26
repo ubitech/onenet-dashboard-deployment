@@ -1,0 +1,62 @@
+packetbeat.interfaces.device: any
+
+packetbeat.flows:
+  timeout: 30s
+  period: 5m
+
+packetbeat.protocols:
+
+- type: icmp
+  enabled: true
+
+- type: dns
+  ports: [53]
+  include_authorities: true
+  include_additionals: true
+
+- type: http
+  ports: [80, 5601, 9200, 8080, 8081, 5000, 8002]
+
+- type: amqp
+  ports: [5672]
+
+- type: cassandra
+  ports: [9042]
+
+- type: memcache
+  ports: [11211]
+
+- type: mysql
+  ports: [3306]
+
+- type: mongodb
+  ports: [27017]
+
+- type: redis
+  ports: [6379]
+
+- type: pgsql
+  ports: [5432]
+
+- type: thrift
+  ports: [9090]
+
+processors:
+- add_cloud_metadata:
+
+#-------------------------- Elasticsearch output ------------------------------
+output.elasticsearch:
+  hosts: ["http://elasticsearch:9200"]
+  username: "elastic"
+  password: "some_password"
+
+setup.kibana:
+  host: "http://kibana:5601"
+  username: "elastic"
+  password: "some_password"
+
+#============================== Dashboards =====================================
+# These settings control loading the sample dashboards to the Kibana index. Loading
+# the dashboards is disabled by default and can be enabled either by setting the
+# options here, or by using the `-setup` CLI flag.
+setup.dashboards.enabled: true

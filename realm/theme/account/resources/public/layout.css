@@ -1,0 +1,25 @@
+.brand {
+  height: 35px;
+  margin-top: 10px;
+}
+
+.delete-button {
+  width: 150px;
+  height: 50px;
+}
+
+.pf-c-page__header {
+  background: #053266;
+}
+
+#applications-list a.pf-c-button.pf-m-link {
+  padding: 0;
+}
+
+@media (max-width: 320px) {
+  .delete-button {
+    width: 120px;
+    height: 50px;
+  }
+
+}

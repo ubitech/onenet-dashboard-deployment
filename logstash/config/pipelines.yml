@@ -1,0 +1,4 @@
+- pipeline.id: connectors
+  path.config: "/usr/share/logstash/pipeline/connectors.conf"
+- pipeline.id: local
+  path.config: "/usr/share/logstash/pipeline/nginx.conf"

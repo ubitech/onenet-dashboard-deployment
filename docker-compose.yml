@@ -1,0 +1,246 @@
+##
+#  deploy
+#  docker-compose up -d
+
+
+version: '3.7'
+
+services:
+
+  onenet:
+    container_name: onenet
+    image: ${BACKEND_IMAGE_PATH}
+    ports:
+      - "${ONENET_PORT}:${ONENET_PORT}"
+    environment:
+      SPRING_APPLICATION_JSON: '{
+        "server.port": "${ONENET_PORT}",
+        "elastic-url" : "${ELASTIC_URL}",
+        "elastic-user" : "${ELASTIC_USER}",
+        "elastic-pass" : "${ELASTIC_PASS}",
+        "keycloak.auth-server-url": "${KEYCLOAK_AUTH_URL_PROD}",
+        "keycloak.realm": "${KEYCLOAK_REALM_PROD}",
+        "keycloak.resource": "${KEYCLOAK_RESOURCE_PROD}",
+        "mykeyclient.client-id": "${KEYCLOAK_RESOURCE_PROD}",
+        "spring.security.oauth2.resourceserver.jwt.issuer-uri" : "${ISSUER_URI}"
+        }'
+#      LOGGING_LEVEL_ROOT: DEBUG
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8080/api/v1/actuator/health" ]
+      interval: 10m
+      timeout: 10s
+      retries: 3
+    volumes:
+      - /home/centos/logs/spring:/opt/app/logs
+    networks:
+      - common
+
+  frontend:
+    container_name: frontend
+    image: ${FRONTEND_IMAGE_PATH}
+    environment:
+      - FRONTEND_PORT=${FRONTEND_PORT}
+    ports:
+      - "${FRONTEND_PORT}:${FRONTEND_PORT}"
+    labels:
+      kompose.service.type: nodeport
+    volumes:
+      - /home/centos/logs/nginx:/var/log/nginx
+    networks:
+      - common
+
+  analytics:
+    container_name: analytics
+    image: ${ANALYTICS_IMAGE_PATH}
+    env_file:
+      - analytics.env
+    ports:
+      - "5005:5005"
+    volumes:
+      - /home/centos/logs/analytics:/logs
+    depends_on:
+      - elasticsearch
+    networks:
+      - common
+
+  cron:
+    image: ${ANALYTICS_IMAGE_PATH}
+    container_name: cron
+    env_file:
+      - analytics.env
+    depends_on:
+      - elasticsearch
+    command: cron -f
+    networks:
+      - common
+
+  keycloak:
+    container_name: keycloak
+    image: quay.io/keycloak/keycloak:15.1.0
+    command:
+      - "-b"
+      - "0.0.0.0"
+      - "-Dkeycloak.migration.action=import"
+      - "-Dkeycloak.migration.provider=dir"
+      - "-Dkeycloak.migration.dir=/config/"
+      - "-Dkeycloak.migration.strategy=IGNORE_EXISTING"
+    volumes:
+      - ./realm/:/config/
+      - ./realm/theme/:/opt/jboss/keycloak/themes/onenet-theme
+    environment:
+      - KEYCLOAK_USER=${KEYCLOAK_ADMIN_USERNAME}
+      - KEYCLOAK_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD}
+      - DB_VENDOR=postgres
+      - DB_USER=${KEYCLOAK_DATABASE_USERNAME}
+      - DB_PASSWORD=${KEYCLOAK_DATABASE_PASSWORD}
+      - DB_ADDR=keycloak-db
+      - DB_PORT=5432
+      - DB_DATABASE=keycloakdb
+      - PROXY_ADDRESS_FORWARDING=true
+      - KEYCLOAK_LOGLEVEL=INFO
+      - KEYCLOAK_HOSTNAME=${KEYCLOAK_URL_PROD}
+    ports:
+      - "${KEYCLOAK_EXTERNAL_PORT}:${KEYCLOAK_INTERNAL_PORT}"
+    depends_on:
+      - keycloak-db
+    networks:
+      - common
+
+  keycloak-db:
+    container_name: keycloak-db
+    image: postgres:10
+    environment:
+      POSTGRES_USER: ${KEYCLOAK_DATABASE_USERNAME}
+      POSTGRES_PASSWORD: ${KEYCLOAK_DATABASE_PASSWORD}
+      POSTGRES_DB: keycloakdb
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - common
+
+  setup:
+    build:
+      context: setup/
+      args:
+        ELASTIC_VERSION: ${ELASTIC_VERSION}
+    init: true
+    volumes:
+      - setup:/state:Z
+    environment:
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:-}
+      LOGSTASH_INTERNAL_PASSWORD: ${LOGSTASH_INTERNAL_PASSWORD:-}
+      KIBANA_SYSTEM_PASSWORD: ${KIBANA_SYSTEM_PASSWORD:-}
+    networks:
+      - common
+    depends_on:
+      - elasticsearch
+
+  elasticsearch:
+    container_name: elasticsearch
+    build:
+      context: elasticsearch/
+      args:
+        ELASTIC_VERSION: ${ELASTIC_VERSION}
+    volumes:
+      - ./elasticsearch/config/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml:ro,z
+      - elasticsearch:/usr/share/elasticsearch/data:z
+#      - ./elasticsearch/config/jvm.options:/usr/share/elasticsearch/config/jvm.options
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    environment:
+      ES_JAVA_OPTS: -Xms9g -Xmx12g
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:-}
+      discovery.type: single-node
+    networks:
+      - common
+  
+  logstash:
+    container_name: logstash
+    build:
+      context: logstash/
+      args:
+        ELASTIC_VERSION: ${ELASTIC_VERSION}
+    volumes:
+      - ./logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml
+      - ./logstash/config/pipelines.yml:/usr/share/logstash/config/pipelines.yml
+      - ./logstash/pipeline:/usr/share/logstash/pipeline
+#      - ./logstash/config/jvm.options:/usr/share/logstash/config/jvm.options
+#      - ./logstash/cert:/etc/logstash/config/certs
+    ports:
+      - "5000:5000"
+      - "9600:9600"
+      - "5035:5035"
+      - "5044:5044"
+      - "5055:5055"
+    environment:
+      LS_JAVA_OPTS: -Xms2g -Xmx4g
+      LOGSTASH_INTERNAL_PASSWORD: ${LOGSTASH_INTERNAL_PASSWORD:-}
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:-}
+      KIBANA_SYSTEM_PASSWORD: ${KIBANA_SYSTEM_PASSWORD:-}
+    networks:
+      - common
+    depends_on:
+      - elasticsearch
+
+  kibana:
+    container_name: kibana
+    build:
+      context: kibana/
+      args:
+        ELASTIC_VERSION: ${ELASTIC_VERSION}
+    volumes:
+      - ./kibana/config/kibana.yml:/usr/share/kibana/config/kibana.yml:ro,Z
+    ports:
+      - "5601:5601"
+    environment:
+      LS_JAVA_OPTS: -Xms1g -Xmx4g
+      LOGSTASH_INTERNAL_PASSWORD: ${LOGSTASH_INTERNAL_PASSWORD:-}
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:-}
+      KIBANA_SYSTEM_PASSWORD: ${KIBANA_SYSTEM_PASSWORD:-}
+    networks:
+      - common
+    depends_on:
+      - elasticsearch
+
+  filebeat:
+    container_name: filebeat
+    image: docker.elastic.co/beats/filebeat:${ELASTIC_VERSION}
+    entrypoint: "filebeat -e -strict.perms=false"
+    volumes:
+      - ./filebeat/config/filebeat.yml:/usr/share/filebeat/filebeat.yml
+      - /home/centos/logs:/var/log
+    environment:
+      LS_JAVA_OPTS: -Xms1g -Xmx4g
+      LOGSTASH_INTERNAL_PASSWORD: ${LOGSTASH_INTERNAL_PASSWORD:-}
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:-}
+      KIBANA_SYSTEM_PASSWORD: ${KIBANA_SYSTEM_PASSWORD:-}
+    networks:
+      - common
+    depends_on:
+      - elasticsearch
+      - logstash
+  
+  analytics-db:
+    container_name: analytics-db
+    image: postgres:10
+    environment:
+      POSTGRES_DB: backend_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: some_password
+    volumes:
+      - database-data:/var/lib/postgresql/data/ 
+    ports:
+      - 5432:5432
+    networks:
+      - common 
+
+volumes:
+  pgdata:
+  elasticsearch:
+  setup:
+  database-data:
+
+networks:
+  common:
+    driver: bridge

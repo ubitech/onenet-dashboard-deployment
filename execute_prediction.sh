@@ -1,0 +1,1 @@
+docker exec analytics /bin/bash -c "curl -X POST http://analytics:5005/api/v1/analytics/anomaly_detection/trigger_prediction_cronjob/"
